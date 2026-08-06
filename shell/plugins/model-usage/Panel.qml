@@ -18,6 +18,11 @@ Panel {
   readonly property color track: Style.selectedFillFor(foreground, Color.accent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
+  // The bar mark comes in two styles: one robot glyph, or one chip per
+  // subscription with its icon and the percentage of its tightest limit.
+  readonly property bool usageIconStyle: String(setting("barIconStyle", "Robot")).toLowerCase() === "usage"
+  property bool styleMenuOpen: false
+
   readonly property var providers: usage.enabledProviders
   // The selection follows the provider, not the slot it happens to sit in: a
   // provider whose first scan lands while the panel is open would otherwise
@@ -52,6 +57,21 @@ Panel {
 
   function refreshNow() {
     usage.refreshAll(true)
+  }
+
+  // Applied locally first so the bar changes on the click itself; the
+  // shell.json write comes back through the bar as the same value.
+  function setIconStyle(style) {
+    styleMenuOpen = false
+    if (String(setting("barIconStyle", "Robot")) === style) return
+
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.barIconStyle = style
+
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
   // ---------------------------------------------------------------- limits
@@ -112,6 +132,12 @@ Panel {
       if (!best || windows[i].percent > best.percent) best = windows[i]
     }
     return best
+  }
+
+  function barPercentText(p) {
+    var w = bindingWindow(p)
+    if (!w || !(w.percent >= 0)) return "—"
+    return Math.round(w.percent * 100) + "%"
   }
 
   function resetMsFor(w) {
@@ -249,9 +275,17 @@ Panel {
   // Nothing to report, nothing in the bar: Bar.qml collapses a slot whose item
   // is invisible, so the icon appears the moment the first scan finds usage and
   // stays away entirely on a machine that has never run either CLI.
+  readonly property Item barButton: usageIconStyle ? usageButton : button
+
   visible: providers.length > 0
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: barButton.implicitWidth
+  implicitHeight: barButton.implicitHeight
+
+  function handleBarPress(buttonCode) {
+    if (buttonCode === Qt.RightButton) styleMenuOpen = true
+    else if (buttonCode === Qt.MiddleButton) selectProvider(providerIndex + 1)
+    else toggle()
+  }
 
   onProviderIndexChanged: if (panelFlick) panelFlick.contentY = 0
   onOpenedChanged: if (opened) {
@@ -286,24 +320,165 @@ Panel {
     function toggle(): void { root.toggle() }
     function refresh(): string { root.refreshNow(); return "ok" }
     function next(): string { root.selectProvider(root.providerIndex + 1); return "ok" }
+    function menu(): string { root.styleMenuOpen = true; return "ok" }
   }
 
   BarIconButton {
     id: button
+    visible: !root.usageIconStyle
     anchors.fill: parent
     bar: root.bar
     text: "󱚣"
     active: root.alarming
-    onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) root.refreshNow()
-      else if (buttonCode === Qt.MiddleButton) root.selectProvider(root.providerIndex + 1)
-      else root.toggle()
+    onPressed: function(buttonCode) { root.handleBarPress(buttonCode) }
+  }
+
+  WidgetButton {
+    id: usageButton
+    visible: root.usageIconStyle
+    anchors.fill: parent
+    bar: root.bar
+    labelVisible: false
+    hasVisualContent: root.usageIconStyle
+    fixedWidth: root.bar && root.bar.vertical ? -1 : chipRow.implicitWidth + Style.space(16)
+    fixedHeight: root.bar && root.bar.vertical ? chipColumn.implicitHeight + Style.space(8) : -1
+    onPressed: function(buttonCode) { root.handleBarPress(buttonCode) }
+
+    Row {
+      id: chipRow
+      visible: !usageButton.vertical
+      anchors.centerIn: parent
+      spacing: Style.space(8)
+
+      Repeater {
+        model: root.providers
+        UsageChip { vertical: false }
+      }
+    }
+
+    Column {
+      id: chipColumn
+      visible: usageButton.vertical
+      anchors.centerIn: parent
+      spacing: Style.space(4)
+
+      Repeater {
+        model: root.providers
+        UsageChip { vertical: true }
+      }
+    }
+  }
+
+  PopupCard {
+    id: styleMenu
+    anchorItem: root.barButton
+    owner: QtObject { function close() { root.styleMenuOpen = false } }
+    bar: root.bar
+    open: root.styleMenuOpen
+    contentWidth: styleMenu.fittedContentWidth(Style.space(300))
+    contentHeight: styleMenu.fittedContentHeight(styleMenuColumn.implicitHeight)
+
+    Column {
+      id: styleMenuColumn
+      anchors.fill: parent
+      spacing: Style.space(8)
+
+      Text {
+        text: "Model usage"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+
+      Text {
+        text: "Shows current AI model usage."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        width: parent.width
+      }
+
+      Button {
+        iconText: "󰑐"
+        text: "Refresh usage stats"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        horizontalPadding: 8
+        verticalPadding: 3
+        iconSize: Style.font.bodySmall
+        fontSize: Style.font.bodySmall
+        onClicked: {
+          root.styleMenuOpen = false
+          root.refreshNow()
+        }
+      }
+
+      PanelSeparator {
+        foreground: root.foreground
+      }
+
+      Text {
+        text: "Icon"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+
+      Text {
+        text: "Choose the icon to show in the bar."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        width: parent.width
+      }
+
+      StyleOption {
+        width: parent.width
+        label: "Robot"
+        style: "Robot"
+        current: !root.usageIconStyle
+
+        Text {
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          text: button.text
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+      }
+
+      StyleOption {
+        width: parent.width
+        label: "Usage"
+        style: "Usage"
+        current: root.usageIconStyle
+
+        Row {
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(8)
+
+          Repeater {
+            model: root.providers
+            UsageChip {
+              vertical: false
+              surfaceColor: Color.popups.background
+              foreground: root.foreground
+            }
+          }
+        }
+      }
     }
   }
 
   KeyboardPanel {
     id: panel
-    anchorItem: button
+    anchorItem: root.barButton
     owner: root
     bar: root.bar
     open: root.opened
@@ -555,6 +730,100 @@ Panel {
           }
         }
       }
+    }
+  }
+
+  // One row in the icon menu: a live preview of the style on the left and its
+  // name next to it, tight like the tray's icon rows. The whole row selects.
+  component StyleOption: Item {
+    id: option
+    property string label: ""
+    property string style: ""
+    property bool current: false
+    default property alias preview: previewSlot.children
+
+    implicitHeight: Style.space(30)
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Style.cornerRadius
+      color: {
+        if (option.current) return root.track
+        if (optionMouse.containsMouse) return Style.hoverFillFor(root.foreground, root.foreground)
+        return "transparent"
+      }
+    }
+
+    Text {
+      id: optionLabel
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(44)
+      text: option.label
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: option.current
+    }
+
+    Item {
+      id: previewSlot
+      anchors.left: optionLabel.right
+      anchors.leftMargin: Style.space(6)
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+    }
+
+    MouseArea {
+      id: optionMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.setIconStyle(option.style)
+    }
+  }
+
+  // One subscription in the bar: the provider mark and the percentage of the
+  // window that stops the next prompt.
+  component UsageChip: Grid {
+    id: chip
+    required property var modelData
+    property bool vertical: false
+    property color surfaceColor: root.bar ? root.bar.background : Color.bar.background
+    property color foreground: usageButton.foreground
+
+    readonly property real pct: {
+      var window = root.bindingWindow(modelData)
+      return window ? Number(window.percent) : -1
+    }
+    readonly property bool alarming: pct >= 0.9
+    readonly property real iconSize: Style.space(13)
+
+    columns: vertical ? 1 : 2
+    columnSpacing: Style.space(4)
+    rowSpacing: Style.space(1)
+    verticalItemAlignment: Grid.AlignVCenter
+    horizontalItemAlignment: Grid.AlignHCenter
+
+    Image {
+      source: root.iconSourceForProvider(chip.modelData, chip.surfaceColor)
+      width: chip.iconSize
+      height: chip.iconSize
+      sourceSize.width: chip.iconSize * 2
+      sourceSize.height: chip.iconSize * 2
+      fillMode: Image.PreserveAspectFit
+      opacity: chip.alarming ? 0.75 : 1
+    }
+
+    Text {
+      text: root.barPercentText(chip.modelData)
+      color: chip.alarming ? root.urgent : chip.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: chip.alarming
     }
   }
 

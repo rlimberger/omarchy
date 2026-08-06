@@ -43,10 +43,12 @@ falls back to local stats only.
 
 ## Interactions
 
-- Bar icon: left = panel, right = refresh, middle = next subscription.
+- Bar icon: left = panel, right = icon style menu (with refresh), middle =
+  next subscription. The menu switches between the robot glyph and one
+  icon-plus-percentage chip per subscription.
 - Panel: `h`/`l` switch subscription, `j`/`k` scroll, `r` or Enter refresh,
   Tab moves to the neighboring bar panel, Esc closes.
-- IPC: `omarchy-shell omarchy.model-usage <open|close|toggle|refresh|next>`.
+- IPC: `omarchy-shell omarchy.model-usage <open|close|toggle|refresh|next|menu>`.
 
 ## Settings
 
@@ -56,6 +58,7 @@ top-level keys can be set with
 
 | Key | Default | What it does |
 |---|---|---|
+| `barIconStyle` | `"Robot"` | `"Usage"` shows each subscription's icon with its tightest limit |
 | `refreshIntervalSec` | `900` | How often local scans and snapshots refresh |
 | `syncMode` | `"Off"` | `"On"` writes this machine's snapshot and merges the others |
 | `syncDir` | `""` | A folder synced by Syncthing, Dropbox, rsync, … |
